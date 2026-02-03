@@ -13,6 +13,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 
 public interface AssetService {
+    // Existing methods
     AssetResponse uploadAsset(MultipartFile file, AssetUploadRequest request) throws IOException;
     AssetResponse getAssetById(Long assetId);
     Page<AssetResponse> getAllAssets(Pageable pageable);
@@ -24,6 +25,20 @@ public interface AssetService {
     AssetResponse rejectAsset(Long assetId, String reason);
     void deleteAsset(Long assetId);
     byte[] downloadAsset(Long assetId) throws IOException;
-
     Page<AssetResponse> getAssetsByCurrentUser(PageRequest of);
+
+    // ✅ Public/Approved asset methods
+    Page<AssetResponse> getApprovedAssets(Pageable pageable);
+    Page<AssetResponse> getApprovedAssetsByType(AssetType type, Pageable pageable);
+    AssetResponse getApprovedAssetById(Long assetId);
+    byte[] downloadApprovedAsset(Long assetId) throws IOException;
+
+    // ✅ Thumbnail method
+    byte[] getThumbnail(Long assetId) throws IOException;
+
+    // ✅ NEW: Get all assets that are NOT pending (approved + rejected)
+    Page<AssetResponse> getNonPendingAssets(Pageable pageable);
+
+    // ✅ NEW: Get all assets that are approved OR pending
+    Page<AssetResponse> getApprovedAndPendingAssets(Pageable pageable);
 }

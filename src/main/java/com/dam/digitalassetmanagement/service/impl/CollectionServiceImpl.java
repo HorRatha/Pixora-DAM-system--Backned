@@ -59,6 +59,7 @@ public class CollectionServiceImpl implements CollectionService {
     }
 
     @Override
+    @Transactional(readOnly = true)  // ✅ ADDED @Transactional
     public CollectionResponse getCollectionById(Long collectionId) {
         AssetCollection collection = collectionRepository.findById(collectionId)
                 .orElseThrow(() -> new CustomExceptions.ResourceNotFoundException(
@@ -67,12 +68,14 @@ public class CollectionServiceImpl implements CollectionService {
     }
 
     @Override
+    @Transactional(readOnly = true)  // ✅ ADDED @Transactional - THIS FIXES THE ERROR
     public Page<CollectionResponse> getAllCollections(Pageable pageable) {
         return collectionRepository.findAll(pageable)
                 .map(this::mapToCollectionResponse);
     }
 
     @Override
+    @Transactional(readOnly = true)  // ✅ ADDED @Transactional
     public Page<CollectionResponse> getMyCollections(Pageable pageable) {
         User currentUser = userService.getCurrentUser();
         return collectionRepository.findByUser_UserId(currentUser.getUserId(), pageable)
@@ -139,9 +142,9 @@ public class CollectionServiceImpl implements CollectionService {
 
         User currentUser = userService.getCurrentUser();
 
-        // Check permission
+        // ✅ FIXED: role is now String, use equalsIgnoreCase() instead of .name()
         if (!collection.getUser().getUserId().equals(currentUser.getUserId()) &&
-                !currentUser.getRole().name().equals("ADMIN")) {
+                !"ADMIN".equalsIgnoreCase(currentUser.getRole())) {
             throw new CustomExceptions.UnauthorizedException(
                     "You don't have permission to delete this collection");
         }
@@ -161,6 +164,7 @@ public class CollectionServiceImpl implements CollectionService {
     }
 
     private CollectionResponse mapToCollectionResponse(AssetCollection collection) {
+        // ✅ This works now because we're inside a @Transactional context
         List<AssetResponse> assets = collection.getAssets().stream()
                 .map(this::mapToAssetResponse)
                 .collect(Collectors.toList());

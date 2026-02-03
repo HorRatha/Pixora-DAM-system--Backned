@@ -35,4 +35,15 @@ public class CustomExceptions {
             super(message);
         }
     }
+
+    // ✅ ADD THIS NEW EXCEPTION CLASS
+    public static class ValidationException extends RuntimeException {
+        public ValidationException(String message) {
+            super(message);
+        }
+
+        public ValidationException(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
 }

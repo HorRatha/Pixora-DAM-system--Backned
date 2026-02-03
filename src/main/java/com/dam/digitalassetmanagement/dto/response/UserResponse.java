@@ -1,6 +1,5 @@
 package com.dam.digitalassetmanagement.dto.response;
 
-import com.dam.digitalassetmanagement.enums.UserRole;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -26,7 +25,16 @@ public class UserResponse {
     private String email;
 
     @Schema(description = "User role", example = "UPLOADER")
-    private UserRole role;
+    private String role;  // ✅ Changed from UserRole enum to String
+
+    @Schema(description = "Full name", example = "John Doe")
+    private String fullName;
+
+    @Schema(description = "Phone number", example = "+1234567890")
+    private String phone;
+
+    @Schema(description = "Profile picture URL")
+    private String profilePictureUrl;
 
     @Schema(description = "Account creation timestamp")
     private LocalDateTime createdAt;

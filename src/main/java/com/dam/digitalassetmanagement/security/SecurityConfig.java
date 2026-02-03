@@ -59,8 +59,14 @@ public class SecurityConfig {
                         .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
                 )
                 .authorizeHttpRequests(auth -> auth
-                        // Public endpoints
-                        .requestMatchers("/api/users/register", "/api/users/login").permitAll()
+                        // Public endpoints - Authentication
+                        .requestMatchers(
+                                "/api/users/register",
+                                "/api/users/login",
+                                "/api/auth/password/forgot",      // ✅ Password reset flow
+                                "/api/auth/password/verify-otp",  // ✅ OTP verification
+                                "/api/auth/password/reset"        // ✅ Final password reset
+                        ).permitAll()
 
                         // Swagger/OpenAPI documentation
                         .requestMatchers(
@@ -77,11 +83,61 @@ public class SecurityConfig {
                         // Health check endpoint
                         .requestMatchers("/actuator/health").permitAll()
 
-                        // Asset endpoints
-                        .requestMatchers(HttpMethod.GET, "/api/assets/**").authenticated()
-                        .requestMatchers(HttpMethod.POST, "/api/assets/**").hasAnyRole("UPLOADER", "EDITOR", "ADMIN")
-                        .requestMatchers(HttpMethod.PUT, "/api/assets/**").hasAnyRole("EDITOR", "ADMIN")
-                        .requestMatchers(HttpMethod.DELETE, "/api/assets/**").hasRole("ADMIN")
+                        // ✅ CRITICAL: Profile picture endpoints - MUST BE BEFORE /api/users/**
+                        .requestMatchers(HttpMethod.GET, "/api/users/profile-picture/**").permitAll() // Public access to view profile pictures
+                        .requestMatchers(HttpMethod.POST, "/api/users/me/profile-picture").authenticated() // Upload requires auth
+                        .requestMatchers(HttpMethod.DELETE, "/api/users/me/profile-picture").authenticated() // Delete requires auth
+
+                        // ✅ User profile endpoints - MUST BE BEFORE generic /api/users/**
+                        .requestMatchers(HttpMethod.GET, "/api/users/me").authenticated()
+                        .requestMatchers(HttpMethod.PUT, "/api/users/me").authenticated()
+
+                        // ============================================
+                        // ✅ ADDED: PUBLIC ASSET DETAIL ENDPOINT
+                        // ============================================
+                        // Asset detail view (public - anyone can view)
+                        .requestMatchers(HttpMethod.GET, "/api/assets/{id}").permitAll()
+
+                        // ============================================
+                        // ✅ ADDED: SOCIAL FEATURES - PUBLIC ENDPOINTS
+                        // ============================================
+
+                        // Views (Recording and counting views)
+                        .requestMatchers(HttpMethod.POST, "/api/assets/*/view").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/assets/*/views/count").permitAll()
+
+                        // Reactions (Likes - counting and checking)
+                        .requestMatchers(HttpMethod.GET, "/api/reactions/asset/*/count").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/reactions/asset/*/has-reacted").permitAll()
+
+                        // Comments (Reading and counting)
+                        .requestMatchers(HttpMethod.GET, "/api/comments/asset/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/comments/asset/*/count").permitAll()
+
+                        // WebSocket for real-time updates
+                        .requestMatchers("/ws/**").permitAll()
+
+                        // ============================================
+                        // ✅ SOCIAL FEATURES - AUTHENTICATED ENDPOINTS
+                        // ============================================
+
+                        // Reactions (Creating/toggling requires auth)
+                        .requestMatchers(HttpMethod.POST, "/api/reactions").authenticated()
+                        .requestMatchers(HttpMethod.DELETE, "/api/reactions/*").authenticated()
+
+                        // Comments (Creating/deleting requires auth)
+                        .requestMatchers(HttpMethod.POST, "/api/comments").authenticated()
+                        .requestMatchers(HttpMethod.DELETE, "/api/comments/*").authenticated()
+
+                        // Public asset endpoints
+                        .requestMatchers("/api/assets/public/**").permitAll()
+
+                        // ✅ FIXED: Asset endpoints - MORE SPECIFIC RULES FIRST
+                        .requestMatchers(HttpMethod.GET, "/api/assets").permitAll() // List all assets - public
+                        .requestMatchers(HttpMethod.GET, "/api/assets/my-assets").authenticated() // My assets - auth required
+                        .requestMatchers(HttpMethod.POST, "/api/assets").hasAnyRole("UPLOADER", "EDITOR", "ADMIN")
+                        .requestMatchers(HttpMethod.PUT, "/api/assets/**").authenticated()
+                        .requestMatchers(HttpMethod.DELETE, "/api/assets/**").authenticated()
 
                         // Collection endpoints
                         .requestMatchers(HttpMethod.GET, "/api/collections/**").authenticated()
@@ -92,7 +148,7 @@ public class SecurityConfig {
                         // Search endpoints
                         .requestMatchers("/api/search/**").authenticated()
 
-                        // Admin-only endpoints
+                        // Admin-only endpoints - LAST, after specific /me and profile-picture endpoints
                         .requestMatchers("/api/users/**").hasRole("ADMIN")
                         .requestMatchers("/api/audit-logs/**").hasAnyRole("EDITOR", "ADMIN")
 
@@ -110,7 +166,7 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(List.of("http://localhost:3000", "http://localhost:4200", "http://localhost:8080"));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
-        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-Requested-With"));
+        configuration.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type", "X-Requested-With", "Accept"));
         configuration.setExposedHeaders(List.of("Authorization"));
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);

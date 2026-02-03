@@ -1,5 +1,10 @@
 package com.dam.digitalassetmanagement.enums;
 
 public enum AssetStatus {
-    PENDING, APPROVED, REJECTED
+    PENDING,
+    APPROVED,
+    REJECTED,
+    ARCHIVED,
+    ACTIVE,
+    INACTIVE
 }

@@ -15,6 +15,7 @@ import org.springframework.data.elasticsearch.core.SearchHits;
 import org.springframework.data.elasticsearch.core.query.Criteria;
 import org.springframework.data.elasticsearch.core.query.CriteriaQuery;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -30,6 +31,7 @@ public class AssetSearchServiceImpl implements AssetSearchService {
     private final ElasticsearchOperations elasticsearchOperations;
 
     @Override
+    @Transactional(readOnly = true)
     public void indexAsset(Asset asset) {
         try {
             AssetDocument document = convertToDocument(asset);
@@ -41,6 +43,7 @@ public class AssetSearchServiceImpl implements AssetSearchService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public void updateAssetIndex(Asset asset) {
         try {
             AssetDocument document = convertToDocument(asset);
@@ -62,28 +65,53 @@ public class AssetSearchServiceImpl implements AssetSearchService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public void reindexAllAssets() {
         try {
             log.info("Starting reindex of all assets...");
 
-            // Clear existing index
-            searchRepository.deleteAll();
+            // ⭐ NOTE: Don't use deleteAll() here, it doesn't work properly
+            // The index should be deleted via SearchController.rebuildIndex()
 
             // Get all assets from database
             List<Asset> assets = assetRepository.findAll();
+            log.info("Found {} assets to reindex", assets.size());
 
-            // Convert and index
-            List<AssetDocument> documents = assets.stream()
-                    .map(this::convertToDocument)
-                    .collect(Collectors.toList());
+            if (assets.isEmpty()) {
+                log.warn("No assets found in database to reindex");
+                return;
+            }
 
-            searchRepository.saveAll(documents);
+            // Convert and index with error handling
+            List<AssetDocument> documents = new ArrayList<>();
+            int successCount = 0;
+            int errorCount = 0;
 
-            log.info("Reindexing completed. Total assets indexed: {}", documents.size());
+            for (Asset asset : assets) {
+                try {
+                    AssetDocument document = convertToDocument(asset);
+                    documents.add(document);
+                    successCount++;
+                } catch (Exception e) {
+                    errorCount++;
+                    log.error("Error converting asset {} to document: {}",
+                            asset.getAssetId(), e.getMessage(), e);
+                }
+            }
+
+            log.info("Successfully converted {} assets, {} errors", successCount, errorCount);
+
+            if (!documents.isEmpty()) {
+                searchRepository.saveAll(documents);
+                log.info("Reindexing completed. Total assets indexed: {}", documents.size());
+            } else {
+                log.error("No documents to save - all conversions failed");
+                throw new RuntimeException("Failed to convert any assets to documents");
+            }
 
         } catch (Exception e) {
             log.error("Error during reindexing", e);
-            throw new RuntimeException("Failed to reindex assets", e);
+            throw new RuntimeException("Failed to reindex assets: " + e.getMessage(), e);
         }
     }
 
@@ -142,6 +170,9 @@ public class AssetSearchServiceImpl implements AssetSearchService {
                                               AssetStatus status, Long userId,
                                               Pageable pageable) {
         try {
+            log.info("Advanced search - keyword: {}, type: {}, status: {}, userId: {}",
+                    keyword, type, status, userId);
+
             List<Criteria> criteriaList = new ArrayList<>();
 
             // Keyword search (title or description)
@@ -154,12 +185,12 @@ public class AssetSearchServiceImpl implements AssetSearchService {
 
             // Type filter
             if (type != null) {
-                criteriaList.add(new Criteria("type").is(type));
+                criteriaList.add(new Criteria("type").is(type.name()));
             }
 
             // Status filter
             if (status != null) {
-                criteriaList.add(new Criteria("status").is(status));
+                criteriaList.add(new Criteria("status").is(status.name()));
             }
 
             // User filter
@@ -171,7 +202,8 @@ public class AssetSearchServiceImpl implements AssetSearchService {
             criteriaList.add(new Criteria("isActive").is(true));
 
             // If no criteria, return all active assets
-            if (criteriaList.isEmpty()) {
+            if (criteriaList.isEmpty() || (criteriaList.size() == 1 && keyword == null && type == null && status == null && userId == null)) {
+                log.info("No specific criteria, returning all active assets");
                 return searchRepository.findByIsActiveTrue(pageable);
             }
 
@@ -184,6 +216,7 @@ public class AssetSearchServiceImpl implements AssetSearchService {
             CriteriaQuery query = new CriteriaQuery(criteria);
             query.setPageable(pageable);
 
+            log.info("Executing Elasticsearch query with criteria");
             SearchHits<AssetDocument> searchHits = elasticsearchOperations.search(
                     query, AssetDocument.class);
 
@@ -191,10 +224,11 @@ public class AssetSearchServiceImpl implements AssetSearchService {
                     .map(SearchHit::getContent)
                     .collect(Collectors.toList());
 
+            log.info("Found {} results", content.size());
             return new PageImpl<>(content, pageable, searchHits.getTotalHits());
 
         } catch (Exception e) {
-            log.error("Error in advanced search", e);
+            log.error("Error in advanced search - Details: {}", e.getMessage(), e);
             return Page.empty(pageable);
         }
     }
@@ -203,35 +237,61 @@ public class AssetSearchServiceImpl implements AssetSearchService {
      * Convert Asset entity to AssetDocument for Elasticsearch
      */
     private AssetDocument convertToDocument(Asset asset) {
-        // Extract file extension from fileUrl
-        String fileExtension = "";
-        if (asset.getFileUrl() != null && asset.getFileUrl().contains(".")) {
-            fileExtension = asset.getFileUrl().substring(asset.getFileUrl().lastIndexOf(".") + 1);
+        try {
+            // Extract file extension from fileUrl
+            String fileExtension = "";
+            if (asset.getFileUrl() != null && asset.getFileUrl().contains(".")) {
+                fileExtension = asset.getFileUrl().substring(asset.getFileUrl().lastIndexOf(".") + 1);
+            }
+
+            // Safe metadata handling with null check
+            String tags = "";
+            try {
+                if (asset.getMetadata() != null && !asset.getMetadata().isEmpty()) {
+                    tags = asset.getMetadata().stream()
+                            .map(m -> m.getKey() + ":" + m.getValue())
+                            .collect(Collectors.joining(", "));
+                }
+            } catch (Exception e) {
+                log.warn("Could not load metadata for asset {}, using empty tags. Error: {}",
+                        asset.getAssetId(), e.getMessage());
+            }
+
+            // Safe user handling
+            Long userId = null;
+            String username = "";
+            try {
+                if (asset.getUser() != null) {
+                    userId = asset.getUser().getUserId();
+                    username = asset.getUser().getUsername();
+                }
+            } catch (Exception e) {
+                log.warn("Could not load user for asset {}, using null user. Error: {}",
+                        asset.getAssetId(), e.getMessage());
+            }
+
+            return AssetDocument.builder()
+                    .assetId(asset.getAssetId())
+                    .title(asset.getTitle())
+                    .description(asset.getDescription())
+                    .type(asset.getType())
+                    .status(asset.getStatus())
+                    .fileUrl(asset.getFileUrl())
+                    .thumbnailUrl(asset.getThumbnailUrl())
+                    .userId(userId)
+                    .username(username)
+                    .version(asset.getVersion())
+                    .isActive(asset.getIsActive())
+                    .createdAt(asset.getCreatedAt())
+                    .updatedAt(asset.getUpdatedAt())
+                    .tags(tags)
+                    .fileExtension(fileExtension)
+                    .fileSize(0L)
+                    .build();
+
+        } catch (Exception e) {
+            log.error("Error converting asset {} to document: {}", asset.getAssetId(), e.getMessage(), e);
+            throw new RuntimeException("Failed to convert asset " + asset.getAssetId(), e);
         }
-
-        // Build tags from metadata (if needed)
-        String tags = asset.getMetadata() != null ?
-                asset.getMetadata().stream()
-                        .map(m -> m.getKey() + ":" + m.getValue())
-                        .collect(Collectors.joining(", ")) : "";
-
-        return AssetDocument.builder()
-                .assetId(asset.getAssetId())
-                .title(asset.getTitle())
-                .description(asset.getDescription())
-                .type(asset.getType())
-                .status(asset.getStatus())
-                .fileUrl(asset.getFileUrl())
-                .thumbnailUrl(asset.getThumbnailUrl())
-                .userId(asset.getUser().getUserId())
-                .username(asset.getUser().getUsername())
-                .version(asset.getVersion())
-                .isActive(asset.getIsActive())
-                .createdAt(asset.getCreatedAt())
-                .updatedAt(asset.getUpdatedAt())
-                .tags(tags)
-                .fileExtension(fileExtension)
-                .fileSize(0L) // Add fileSize to Asset entity if needed
-                .build();
     }
 }

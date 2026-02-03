@@ -13,6 +13,7 @@ import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.Resource;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -33,6 +34,67 @@ public class AssetController {
 
     private final AssetService assetService;
 
+    // ✅ EXISTING: Public endpoint to get all APPROVED assets
+    @GetMapping("/public")
+    @Operation(summary = "Get all approved assets (Public - No authentication required)")
+    public ResponseEntity<Page<AssetResponse>> getPublicAssets(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) AssetType type) {
+
+        Page<AssetResponse> assets;
+        if (type != null) {
+            assets = assetService.getApprovedAssetsByType(type, PageRequest.of(page, size));
+        } else {
+            assets = assetService.getApprovedAssets(PageRequest.of(page, size));
+        }
+
+        return ResponseEntity.ok(assets);
+    }
+
+    // ✅ EXISTING: Public endpoint to view a single approved asset
+    @GetMapping("/public/{assetId}")
+    @Operation(summary = "Get approved asset details (Public - No authentication required)")
+    public ResponseEntity<AssetResponse> getPublicAssetById(@PathVariable Long assetId) {
+        AssetResponse asset = assetService.getApprovedAssetById(assetId);
+        return ResponseEntity.ok(asset);
+    }
+
+    // ✅ EXISTING: Public endpoint to download approved assets
+    @GetMapping("/public/{assetId}/download")
+    @Operation(summary = "Download approved asset (Public - No authentication required)")
+    public ResponseEntity<Resource> downloadPublicAsset(@PathVariable Long assetId) throws IOException {
+        byte[] data = assetService.downloadApprovedAsset(assetId);
+        AssetResponse asset = assetService.getApprovedAssetById(assetId);
+        ByteArrayResource resource = new ByteArrayResource(data);
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + asset.getTitle() + "\"")
+                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .contentLength(data.length)
+                .body(resource);
+    }
+
+    // ✅ EXISTING: Public endpoint to get thumbnail for approved assets
+    @GetMapping("/public/{assetId}/thumbnail")
+    @Operation(summary = "Get thumbnail for approved asset (Public - No authentication required)")
+    public ResponseEntity<Resource> getPublicThumbnail(@PathVariable Long assetId) throws IOException {
+        byte[] data = assetService.getThumbnail(assetId);
+
+        if (data == null || data.length == 0) {
+            // If no thumbnail exists, return the full image
+            data = assetService.downloadApprovedAsset(assetId);
+        }
+
+        ByteArrayResource resource = new ByteArrayResource(data);
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.IMAGE_JPEG) // ✅ Set correct content type for images
+                .contentLength(data.length)
+                .body(resource);
+    }
+
+    // ✅ EXISTING: Upload new asset
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @PreAuthorize("hasAnyRole('UPLOADER', 'EDITOR', 'ADMIN')")
     @Operation(summary = "Upload new asset")
@@ -52,8 +114,9 @@ public class AssetController {
         return ResponseEntity.ok(asset);
     }
 
+    // ✅ EXISTING: Get all assets with pagination and filters
     @GetMapping
-    @Operation(summary = "Get all assets with pagination and filters")
+    @Operation(summary = "Get all assets with pagination and filters (Authenticated users)")
     public ResponseEntity<Page<AssetResponse>> getAllAssets(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
@@ -72,13 +135,55 @@ public class AssetController {
         return ResponseEntity.ok(assets);
     }
 
+    // ✅ NEW: Get all assets that are NOT pending (APPROVED + REJECTED)
+    @GetMapping("/non-pending")
+    @PreAuthorize("hasAnyRole('EDITOR', 'ADMIN')")
+    @Operation(summary = "Get all non-pending assets (Approved + Rejected) - Editor/Admin only")
+    public ResponseEntity<Page<AssetResponse>> getNonPendingAssets(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "DESC") String sortDir) {
+
+        Sort sort = sortDir.equalsIgnoreCase("ASC")
+                ? Sort.by(sortBy).ascending()
+                : Sort.by(sortBy).descending();
+
+        Page<AssetResponse> assets = assetService.getNonPendingAssets(
+                PageRequest.of(page, size, sort)
+        );
+        return ResponseEntity.ok(assets);
+    }
+
+    // ✅ NEW: Get all assets that are APPROVED or PENDING
+    @GetMapping("/approved-and-pending")
+    @PreAuthorize("hasAnyRole('EDITOR', 'ADMIN')")
+    @Operation(summary = "Get all approved and pending assets - Editor/Admin only")
+    public ResponseEntity<Page<AssetResponse>> getApprovedAndPendingAssets(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "DESC") String sortDir) {
+
+        Sort sort = sortDir.equalsIgnoreCase("ASC")
+                ? Sort.by(sortBy).ascending()
+                : Sort.by(sortBy).descending();
+
+        Page<AssetResponse> assets = assetService.getApprovedAndPendingAssets(
+                PageRequest.of(page, size, sort)
+        );
+        return ResponseEntity.ok(assets);
+    }
+
+    // ✅ EXISTING: Get asset by ID
     @GetMapping("/{assetId}")
-    @Operation(summary = "Get asset by ID")
+    @Operation(summary = "Get asset by ID (Authenticated users)")
     public ResponseEntity<AssetResponse> getAssetById(@PathVariable Long assetId) {
         AssetResponse asset = assetService.getAssetById(assetId);
         return ResponseEntity.ok(asset);
     }
 
+    // ✅ EXISTING: Get assets by current user
     @GetMapping("/my-assets")
     @Operation(summary = "Get assets by current user")
     public ResponseEntity<Page<AssetResponse>> getMyAssets(
@@ -91,9 +196,10 @@ public class AssetController {
         return ResponseEntity.ok(assets);
     }
 
+    // ✅ EXISTING: Update asset metadata
     @PutMapping("/{assetId}")
-    @PreAuthorize("hasAnyRole('EDITOR', 'ADMIN')")
-    @Operation(summary = "Update asset metadata")
+    @PreAuthorize("@assetSecurityService.canModify(#assetId, authentication)")
+    @Operation(summary = "Update asset metadata (Owner or Admin only)")
     public ResponseEntity<AssetResponse> updateAsset(
             @PathVariable Long assetId,
             @RequestParam(required = false) String title,
@@ -107,9 +213,10 @@ public class AssetController {
         return ResponseEntity.ok(asset);
     }
 
+    // ✅ EXISTING: Approve asset
     @PutMapping("/{assetId}/approve")
     @PreAuthorize("hasAnyRole('EDITOR', 'ADMIN')")
-    @Operation(summary = "Approve asset")
+    @Operation(summary = "Approve asset (Editor/Admin only)")
     public ResponseEntity<AssetResponse> approveAsset(
             @PathVariable Long assetId,
             @AuthenticationPrincipal UserDetails userDetails) {
@@ -118,9 +225,10 @@ public class AssetController {
         return ResponseEntity.ok(asset);
     }
 
+    // ✅ EXISTING: Reject asset
     @PutMapping("/{assetId}/reject")
     @PreAuthorize("hasAnyRole('EDITOR', 'ADMIN')")
-    @Operation(summary = "Reject asset")
+    @Operation(summary = "Reject asset (Editor/Admin only)")
     public ResponseEntity<AssetResponse> rejectAsset(
             @PathVariable Long assetId,
             @RequestParam String reason,
@@ -130,8 +238,9 @@ public class AssetController {
         return ResponseEntity.ok(asset);
     }
 
+    // ✅ EXISTING: Download asset file
     @GetMapping("/{assetId}/download")
-    @Operation(summary = "Download asset file")
+    @Operation(summary = "Download asset file (Authenticated users)")
     public ResponseEntity<Resource> downloadAsset(
             @PathVariable Long assetId,
             @AuthenticationPrincipal UserDetails userDetails) throws IOException {
@@ -147,9 +256,10 @@ public class AssetController {
                 .body(resource);
     }
 
+    // ✅ EXISTING: Delete asset
     @DeleteMapping("/{assetId}")
-    @PreAuthorize("hasAnyRole('ADMIN')")
-    @Operation(summary = "Delete asset (Admin only)")
+    @PreAuthorize("@assetSecurityService.canModify(#assetId, authentication)")
+    @Operation(summary = "Delete asset (Owner or Admin only)")
     public ResponseEntity<Map<String, String>> deleteAsset(@PathVariable Long assetId) {
         assetService.deleteAsset(assetId);
         return ResponseEntity.ok(Map.of("message", "Asset deleted successfully"));

@@ -16,7 +16,7 @@ public class WatermarkUtil {
     @Value("${app.watermark-enabled:true}")
     private boolean watermarkEnabled;
 
-    @Value("${app.watermark-text:© DAM System}")
+    @Value("${app.watermark-text:© Pixora}")
     private String watermarkText;
 
     @Value("${app.thumbnail-width:300}")
